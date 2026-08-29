@@ -1,0 +1,113 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1">
+<title>เมนูคำสั่ง</title>
+<script src="https://static.line-scdn.net/liff/edge/2/sdk.js"></script>
+<style>
+  * { box-sizing: border-box; }
+  body { font-family: -apple-system, "Segoe UI", Roboto, sans-serif; margin: 0; padding: 20px; background: #F7F7F7; }
+  h1 { font-size: 18px; color: #333; margin: 8px 0 20px; text-align: center; }
+  .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }
+  button.cmd { border: none; border-radius: 16px; padding: 24px 10px; color: #fff; font-size: 16px; font-weight: bold;
+    box-shadow: 0 2px 6px rgba(0,0,0,0.12); transition: opacity 0.1s, transform 0.1s; }
+  button.cmd:active { transform: scale(0.96); }
+  button.cmd:disabled { opacity: 0.35; }
+  .c1 { background: #27AE60; } .c2 { background: #2980B9; } .c3 { background: #7F8C8D; } .c4 { background: #8E44AD; }
+  #status { text-align: center; margin-top: 24px; color: #999; font-size: 14px; min-height: 20px; }
+  .spinner { display: inline-block; width: 16px; height: 16px; border: 2px solid #ccc; border-top-color: #E74C3C;
+    border-radius: 50%; animation: spin 0.7s linear infinite; vertical-align: middle; margin-right: 6px; }
+  @keyframes spin { to { transform: rotate(360deg); } }
+</style>
+</head>
+<body>
+<h1>เมนูคำสั่ง</h1>
+<div class="grid">
+  <button class="cmd c1" data-cmd="สรุป" disabled>📊<br>สรุปยอด</button>
+  <button class="cmd c2" data-cmd="วันนี้" disabled>🧾<br>รายการวันนี้</button>
+  <button class="cmd c3" data-cmd="ลบ" disabled>🗑️<br>ลบรายการล่าสุด</button>
+  <button class="cmd c4" data-cmd="คำสั่ง" disabled>📖<br>คำสั่งทั้งหมด</button>
+</div>
+<div id="status" data-stage="กำลังโหลดหน้าเว็บ...">กำลังโหลดหน้าเว็บ...</div>
+
+<script>
+  // ---------- ตั้งค่า ----------
+  var WEBAPP_URL = "https://script.google.com/macros/s/AKfycbwJdFFcuy-DlALxIbI21BB09ZokFvh3QHx-tV0Si0AIeMBaMx9uGpLugy6i-H2fnSa5QQ/exec";
+  var LIFF_ID = "2011319043-r4FokOam";
+
+  var buttons = document.querySelectorAll(".cmd");
+  var statusEl = document.getElementById("status");
+  var userId = null;
+
+  function disableAll() {
+    buttons.forEach(function (b) { b.disabled = true; });
+  }
+  function enableAll() {
+    buttons.forEach(function (b) { b.disabled = false; });
+  }
+  function setStage(text) {
+    statusEl.textContent = text;
+    statusEl.setAttribute("data-stage", text);
+  }
+
+  buttons.forEach(function (btn) {
+    btn.addEventListener("click", function () {
+      disableAll();
+      statusEl.innerHTML = '<span class="spinner"></span>กำลังทำงาน...';
+      runCommand(btn.getAttribute("data-cmd"));
+    });
+  });
+
+  function runCommand(cmd) {
+    if (!userId) {
+      statusEl.textContent = "ยังไม่พร้อม กรุณารอสักครู่แล้วลองใหม่";
+      return;
+    }
+    fetch(WEBAPP_URL, {
+      method: "POST",
+      headers: { "Content-Type": "text/plain" },
+      body: JSON.stringify({ liffCommand: cmd, userId: userId })
+    }).then(function () {
+      statusEl.textContent = "เสร็จแล้ว ✅ ดูผลลัพธ์ในแชท";
+      setTimeout(function () {
+        if (window.liff && liff.isInClient && liff.isInClient()) { liff.closeWindow(); }
+      }, 1200);
+    }).catch(function () {
+      statusEl.textContent = "เกิดข้อผิดพลาด ลองใหม่อีกครั้ง";
+      enableAll();
+    });
+  }
+
+  var connectTimeout = setTimeout(function () {
+    if (!userId) {
+      statusEl.textContent = "ค้างที่: " + statusEl.getAttribute("data-stage") + " (หมดเวลา 20 วิ) ลองปิดแล้วเปิดใหม่";
+    }
+  }, 20000);
+
+  try {
+    if (typeof liff === "undefined") {
+      throw new Error("liff SDK object ไม่พบ (สคริปต์โหลดไม่สำเร็จ)");
+    }
+    setStage("SDK พร้อม กำลังเชื่อมต่อ LIFF...");
+    liff.init({ liffId: LIFF_ID }).then(function () {
+      setStage("เชื่อมต่อ LIFF สำเร็จ กำลังดึงข้อมูลผู้ใช้...");
+      return liff.getProfile();
+    }).then(function (profile) {
+      clearTimeout(connectTimeout);
+      userId = profile.userId;
+      statusEl.textContent = "";
+      enableAll();
+    }).catch(function (err) {
+      clearTimeout(connectTimeout);
+      statusEl.textContent = "เกิดข้อผิดพลาด: " + (err && err.message ? err.message : err);
+      disableAll();
+    });
+  } catch (err) {
+    clearTimeout(connectTimeout);
+    statusEl.textContent = "โหลด LIFF SDK ไม่สำเร็จ: " + (err && err.message ? err.message : err);
+    disableAll();
+  }
+</script>
+</body>
+</html>
