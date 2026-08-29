@@ -5,6 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1">
 <title>เมนูคำสั่ง</title>
 <script src="https://static.line-scdn.net/liff/edge/2/sdk.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4"></script>
 <style>
   * { box-sizing: border-box; }
   body { font-family: -apple-system, "Segoe UI", Roboto, sans-serif; margin: 0; padding: 20px; background: #F7F7F7; }
@@ -14,11 +15,21 @@
     box-shadow: 0 2px 6px rgba(0,0,0,0.12); transition: opacity 0.1s, transform 0.1s; }
   button.cmd:active { transform: scale(0.96); }
   button.cmd:disabled { opacity: 0.35; }
-  .c1 { background: #27AE60; } .c2 { background: #2980B9; } .c3 { background: #7F8C8D; } .c4 { background: #8E44AD; }
-  #status { text-align: center; margin-top: 24px; color: #999; font-size: 14px; min-height: 20px; }
+  .c1 { background: #27AE60; } .c2 { background: #2980B9; } .c3 { background: #7F8C8D; } .c4 { background: #8E44AD; } .c5 { background: #E67E22; }
+  #status { text-align: center; margin-top: 20px; color: #999; font-size: 14px; min-height: 20px; }
   .spinner { display: inline-block; width: 16px; height: 16px; border: 2px solid #ccc; border-top-color: #E74C3C;
     border-radius: 50%; animation: spin 0.7s linear infinite; vertical-align: middle; margin-right: 6px; }
   @keyframes spin { to { transform: rotate(360deg); } }
+
+  #resultBox { display: none; margin-top: 16px; background: #fff; border-radius: 14px; padding: 16px;
+    box-shadow: 0 2px 8px rgba(0,0,0,0.08); }
+  #resultText { font-size: 14px; color: #333; white-space: pre-wrap; line-height: 1.6; }
+  #closeBtn { display: block; width: 100%; margin-top: 14px; padding: 10px; border: none; border-radius: 10px;
+    background: #EEEEEE; color: #666; font-size: 14px; }
+
+  #chartBox { display: none; margin-top: 16px; background: #fff; border-radius: 14px; padding: 16px;
+    box-shadow: 0 2px 8px rgba(0,0,0,0.08); }
+  #chartBox h2 { font-size: 15px; color: #333; margin: 0 0 12px; }
 </style>
 </head>
 <body>
@@ -29,7 +40,21 @@
   <button class="cmd c3" data-cmd="ลบ" disabled>🗑️<br>ลบรายการล่าสุด</button>
   <button class="cmd c4" data-cmd="คำสั่ง" disabled>📖<br>คำสั่งทั้งหมด</button>
 </div>
+<div class="grid" style="grid-template-columns: 1fr; margin-top: 14px;">
+  <button class="cmd c5" id="chartBtn" disabled>📈<br>กราฟรายจ่าย 14 วันล่าสุด</button>
+</div>
+
 <div id="status" data-stage="กำลังโหลดหน้าเว็บ...">กำลังโหลดหน้าเว็บ...</div>
+
+<div id="resultBox">
+  <div id="resultText"></div>
+  <button id="closeBtn">ปิดหน้าต่างนี้</button>
+</div>
+
+<div id="chartBox">
+  <h2>รายจ่ายรวมต่อวัน (14 วันล่าสุด)</h2>
+  <canvas id="chartCanvas" height="180"></canvas>
+</div>
 
 <script>
   // ---------- ตั้งค่า ----------
@@ -37,50 +62,135 @@
   var LIFF_ID = "2011319043-r4FokOam";
 
   var buttons = document.querySelectorAll(".cmd");
+  var chartBtn = document.getElementById("chartBtn");
   var statusEl = document.getElementById("status");
-  var userId = null;
+  var resultBox = document.getElementById("resultBox");
+  var resultText = document.getElementById("resultText");
+  var closeBtn = document.getElementById("closeBtn");
+  var chartBox = document.getElementById("chartBox");
+  var idToken = null;
+  var chartInstance = null;
 
   function disableAll() {
     buttons.forEach(function (b) { b.disabled = true; });
+    chartBtn.disabled = true;
   }
   function enableAll() {
     buttons.forEach(function (b) { b.disabled = false; });
+    chartBtn.disabled = false;
   }
   function setStage(text) {
     statusEl.textContent = text;
     statusEl.setAttribute("data-stage", text);
   }
 
+  closeBtn.addEventListener("click", function () {
+    if (window.liff && liff.isInClient && liff.isInClient()) { liff.closeWindow(); }
+  });
+
   buttons.forEach(function (btn) {
     btn.addEventListener("click", function () {
       disableAll();
+      resultBox.style.display = "none";
+      chartBox.style.display = "none";
       statusEl.innerHTML = '<span class="spinner"></span>กำลังทำงาน...';
       runCommand(btn.getAttribute("data-cmd"));
     });
   });
 
+  chartBtn.addEventListener("click", function () {
+    disableAll();
+    resultBox.style.display = "none";
+    chartBox.style.display = "none";
+    statusEl.innerHTML = '<span class="spinner"></span>กำลังโหลดกราฟ...';
+    runChart();
+  });
+
   function runCommand(cmd) {
-    if (!userId) {
+    if (!idToken) {
       statusEl.textContent = "ยังไม่พร้อม กรุณารอสักครู่แล้วลองใหม่";
+      enableAll();
       return;
     }
     fetch(WEBAPP_URL, {
       method: "POST",
       headers: { "Content-Type": "text/plain" },
-      body: JSON.stringify({ liffCommand: cmd, userId: userId })
-    }).then(function () {
-      statusEl.textContent = "เสร็จแล้ว ✅ ดูผลลัพธ์ในแชท";
-      setTimeout(function () {
-        if (window.liff && liff.isInClient && liff.isInClient()) { liff.closeWindow(); }
-      }, 1200);
+      body: JSON.stringify({ liffCommand: cmd, idToken: idToken })
+    }).then(function (res) {
+      return res.json();
+    }).then(function (data) {
+      statusEl.textContent = "";
+      if (data.status === "ok") {
+        resultText.textContent = data.summary || "เสร็จแล้ว";
+        resultBox.style.display = "block";
+      } else {
+        resultText.textContent = "เกิดข้อผิดพลาด: " + (data.message || "ไม่ทราบสาเหตุ");
+        resultBox.style.display = "block";
+      }
+      enableAll();
     }).catch(function () {
       statusEl.textContent = "เกิดข้อผิดพลาด ลองใหม่อีกครั้ง";
       enableAll();
     });
   }
 
+  function runChart() {
+    if (!idToken) {
+      statusEl.textContent = "ยังไม่พร้อม กรุณารอสักครู่แล้วลองใหม่";
+      enableAll();
+      return;
+    }
+    fetch(WEBAPP_URL, {
+      method: "POST",
+      headers: { "Content-Type": "text/plain" },
+      body: JSON.stringify({ liffChart: true, idToken: idToken })
+    }).then(function (res) {
+      return res.json();
+    }).then(function (data) {
+      statusEl.textContent = "";
+      enableAll();
+      if (data.status === "ok" && data.chart) {
+        drawChart(data.chart);
+      } else {
+        resultText.textContent = "โหลดกราฟไม่สำเร็จ: " + (data.message || "ไม่ทราบสาเหตุ");
+        resultBox.style.display = "block";
+      }
+    }).catch(function () {
+      statusEl.textContent = "เกิดข้อผิดพลาด ลองใหม่อีกครั้ง";
+      enableAll();
+    });
+  }
+
+  function drawChart(chartData) {
+    var labels = chartData.map(function (d) {
+      var parts = d.date.split("-");
+      return parts[2] + "/" + parts[1];
+    });
+    var amounts = chartData.map(function (d) { return d.amount; });
+
+    chartBox.style.display = "block";
+    var ctx = document.getElementById("chartCanvas").getContext("2d");
+    if (chartInstance) { chartInstance.destroy(); }
+    chartInstance = new Chart(ctx, {
+      type: "bar",
+      data: {
+        labels: labels,
+        datasets: [{
+          label: "รายจ่าย (บาท)",
+          data: amounts,
+          backgroundColor: "#E74C3C"
+        }]
+      },
+      options: {
+        responsive: true,
+        plugins: { legend: { display: false } },
+        scales: { y: { beginAtZero: true } }
+      }
+    });
+  }
+
   var connectTimeout = setTimeout(function () {
-    if (!userId) {
+    if (!idToken) {
       statusEl.textContent = "ค้างที่: " + statusEl.getAttribute("data-stage") + " (หมดเวลา 20 วิ) ลองปิดแล้วเปิดใหม่";
     }
   }, 20000);
@@ -91,11 +201,15 @@
     }
     setStage("SDK พร้อม กำลังเชื่อมต่อ LIFF...");
     liff.init({ liffId: LIFF_ID }).then(function () {
-      setStage("เชื่อมต่อ LIFF สำเร็จ กำลังดึงข้อมูลผู้ใช้...");
-      return liff.getProfile();
-    }).then(function (profile) {
+      setStage("เชื่อมต่อ LIFF สำเร็จ กำลังยืนยันตัวตน...");
+      var token = liff.getIDToken();
+      if (!token) {
+        throw new Error("ไม่ได้รับ ID Token (เช็คว่าเปิด scope openid ใน LIFF App แล้วหรือยัง)");
+      }
+      return token;
+    }).then(function (token) {
       clearTimeout(connectTimeout);
-      userId = profile.userId;
+      idToken = token;
       statusEl.textContent = "";
       enableAll();
     }).catch(function (err) {
