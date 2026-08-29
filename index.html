@@ -61,7 +61,7 @@
   var WEBAPP_URL = "https://script.google.com/macros/s/AKfycbzPGg5Fg-E5W7-XG7YPrzbmLqgVmurdzYj7V65y_6LxKK403Pa-_K62tCDtuhtXFE1y5Q/exec";
   var LIFF_ID = "2011319043-r4FokOam";
 
-  var buttons = document.querySelectorAll(".cmd");
+  var buttons = document.querySelectorAll(".cmd[data-cmd]");
   var chartBtn = document.getElementById("chartBtn");
   var statusEl = document.getElementById("status");
   var resultBox = document.getElementById("resultBox");
@@ -145,19 +145,27 @@
       headers: { "Content-Type": "text/plain" },
       body: JSON.stringify({ liffChart: true, idToken: idToken })
     }).then(function (res) {
-      return res.json();
+      return res.text().then(function (raw) {
+        var parsed;
+        try { parsed = JSON.parse(raw); } catch (e) {
+          throw new Error("เซิร์ฟเวอร์ตอบกลับไม่ใช่ JSON: " + raw.substring(0, 200));
+        }
+        return parsed;
+      });
     }).then(function (data) {
       statusEl.textContent = "";
       enableAll();
-      if (data.status === "ok" && data.chart) {
+      if (data.status === "ok" && data.chart && data.chart.length) {
         drawChart(data.chart);
       } else {
-        resultText.textContent = "โหลดกราฟไม่สำเร็จ: " + (data.message || "ไม่ทราบสาเหตุ");
+        resultText.textContent = "โหลดกราฟไม่สำเร็จ: " + (data.message || JSON.stringify(data));
         resultBox.style.display = "block";
       }
-    }).catch(function () {
-      statusEl.textContent = "เกิดข้อผิดพลาด ลองใหม่อีกครั้ง";
+    }).catch(function (err) {
+      statusEl.textContent = "";
       enableAll();
+      resultText.textContent = "เกิดข้อผิดพลาดตอนโหลดกราฟ: " + (err && err.message ? err.message : err);
+      resultBox.style.display = "block";
     });
   }
 
